@@ -1,1 +1,1 @@
-# project_databricks_nbp
+# databricks-nbp-lakehouse
