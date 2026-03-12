@@ -9,10 +9,7 @@ from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, St
 
 
 def setup_logger() -> logging.Logger:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     return logging.getLogger("bronze_to_silver")
 
 
@@ -27,9 +24,11 @@ def get_spark() -> SparkSession:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Transform NBP bronze JSONL into silver Delta table.")
+    parser = argparse.ArgumentParser(description="Transform NBP bronze into silver Delta.")
     parser.add_argument("--bronze-path", default="data/bronze/nbp_raw.jsonl")
     parser.add_argument("--silver-path", default="data/delta/silver/nbp_rates")
+    parser.add_argument("--bronze-table", default=None, help="UC table, e.g. fx_lakehouse.nbp.bronze_nbp_raw")
+    parser.add_argument("--silver-table", default=None, help="UC table, e.g. fx_lakehouse.nbp.silver_nbp_rates")
     return parser.parse_args()
 
 
@@ -41,7 +40,7 @@ def main() -> None:
         [
             StructField("ingestion_ts", StringType(), True),
             StructField("source_url", StringType(), True),
-            StructField("table_type", StringType(), True),  # lineage/traceability
+            StructField("table_type", StringType(), True),
             StructField("effective_date", StringType(), True),
             StructField("raw_payload", StringType(), True),
         ]
@@ -66,8 +65,12 @@ def main() -> None:
     spark = get_spark()
 
     try:
-        logger.info("Reading bronze data from %s", args.bronze_path)
-        bronze = spark.read.schema(bronze_schema).json(args.bronze_path)
+        if args.bronze_table:
+            logger.info("Reading bronze table %s", args.bronze_table)
+            bronze = spark.read.table(args.bronze_table)
+        else:
+            logger.info("Reading bronze path %s", args.bronze_path)
+            bronze = spark.read.schema(bronze_schema).json(args.bronze_path)
 
         parsed = (
             bronze.withColumn("payload", F.from_json(F.col("raw_payload"), payload_schema))
@@ -86,59 +89,99 @@ def main() -> None:
                 F.col("ingestion_ts"),
             )
             .filter(F.col("rate_date").isNotNull())
-            .filter(F.col("currency_code").isNotNull())
             .filter(F.length(F.col("currency_code")) == 3)
             .filter(F.col("mid_rate").isNotNull())
             .filter(F.col("mid_rate") > 0)
         )
 
-        # Keep only latest row per business key inside current batch
         w = Window.partitionBy("table_type", "rate_date", "currency_code").orderBy(F.col("ingestion_ts").desc())
         silver_batch = exploded.withColumn("rn", F.row_number().over(w)).filter(F.col("rn") == 1).drop("rn")
 
-        silver_path = Path(args.silver_path)
-        delta_exists = (silver_path / "_delta_log").exists()
-
-        if not delta_exists:
-            logger.info("Creating silver Delta table at %s", args.silver_path)
-            (
-                silver_batch.write.format("delta")
-                .mode("overwrite")
-                .partitionBy("rate_date")
-                .save(args.silver_path)
-            )
+        if args.silver_table:
+            if not spark.catalog.tableExists(args.silver_table):
+                logger.info("Creating silver table %s", args.silver_table)
+                (
+                    silver_batch.write.format("delta")
+                    .mode("overwrite")
+                    .partitionBy("rate_date")
+                    .saveAsTable(args.silver_table)
+                )
+            else:
+                logger.info("Merging into silver table %s", args.silver_table)
+                target = DeltaTable.forName(spark, args.silver_table)
+                (
+                    target.alias("t")
+                    .merge(
+                        silver_batch.alias("s"),
+                        """
+                        t.table_type = s.table_type
+                        AND t.rate_date = s.rate_date
+                        AND t.currency_code = s.currency_code
+                        """,
+                    )
+                    .whenMatchedUpdate(
+                        set={
+                            "currency_name": "s.currency_name",
+                            "mid_rate": "s.mid_rate",
+                            "ingestion_ts": "s.ingestion_ts",
+                        }
+                    )
+                    .whenNotMatchedInsert(
+                        values={
+                            "table_type": "s.table_type",
+                            "rate_date": "s.rate_date",
+                            "currency_code": "s.currency_code",
+                            "currency_name": "s.currency_name",
+                            "mid_rate": "s.mid_rate",
+                            "ingestion_ts": "s.ingestion_ts",
+                        }
+                    )
+                    .execute()
+                )
         else:
-            logger.info("Merging batch into existing silver Delta table at %s", args.silver_path)
-            target = DeltaTable.forPath(spark, args.silver_path)
-            (
-                target.alias("t")
-                .merge(
-                    silver_batch.alias("s"),
-                    """
-                    t.table_type = s.table_type
-                    AND t.rate_date = s.rate_date
-                    AND t.currency_code = s.currency_code
-                    """,
+            silver_path = Path(args.silver_path)
+            delta_exists = (silver_path / "_delta_log").exists()
+
+            if not delta_exists:
+                logger.info("Creating silver Delta at %s", args.silver_path)
+                (
+                    silver_batch.write.format("delta")
+                    .mode("overwrite")
+                    .partitionBy("rate_date")
+                    .save(args.silver_path)
                 )
-                .whenMatchedUpdate(
-                    set={
-                        "currency_name": "s.currency_name",
-                        "mid_rate": "s.mid_rate",
-                        "ingestion_ts": "s.ingestion_ts",
-                    }
+            else:
+                logger.info("Merging into silver Delta at %s", args.silver_path)
+                target = DeltaTable.forPath(spark, args.silver_path)
+                (
+                    target.alias("t")
+                    .merge(
+                        silver_batch.alias("s"),
+                        """
+                        t.table_type = s.table_type
+                        AND t.rate_date = s.rate_date
+                        AND t.currency_code = s.currency_code
+                        """,
+                    )
+                    .whenMatchedUpdate(
+                        set={
+                            "currency_name": "s.currency_name",
+                            "mid_rate": "s.mid_rate",
+                            "ingestion_ts": "s.ingestion_ts",
+                        }
+                    )
+                    .whenNotMatchedInsert(
+                        values={
+                            "table_type": "s.table_type",
+                            "rate_date": "s.rate_date",
+                            "currency_code": "s.currency_code",
+                            "currency_name": "s.currency_name",
+                            "mid_rate": "s.mid_rate",
+                            "ingestion_ts": "s.ingestion_ts",
+                        }
+                    )
+                    .execute()
                 )
-                .whenNotMatchedInsert(
-                    values={
-                        "table_type": "s.table_type",
-                        "rate_date": "s.rate_date",
-                        "currency_code": "s.currency_code",
-                        "currency_name": "s.currency_name",
-                        "mid_rate": "s.mid_rate",
-                        "ingestion_ts": "s.ingestion_ts",
-                    }
-                )
-                .execute()
-            )
 
         logger.info("Silver transformation completed successfully")
     except Exception:

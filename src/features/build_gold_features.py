@@ -33,6 +33,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build gold feature table from silver FX rates.")
     parser.add_argument("--silver-path", default=SILVER_PATH_DEFAULT)
     parser.add_argument("--gold-path", default=GOLD_FEATURES_PATH_DEFAULT)
+    parser.add_argument("--silver-table", default=None, help="UC table, e.g. fx_lakehouse.nbp.silver_nbp_rates")
+    parser.add_argument("--gold-table", default=None, help="UC table, e.g. fx_lakehouse.nbp.gold_fx_features")
     return parser.parse_args()
 
 
@@ -74,12 +76,15 @@ def build_features(df: DataFrame) -> DataFrame:
     )
 
 
-def read_silver(spark: SparkSession, path: str) -> DataFrame:
-    return spark.read.format("delta").load(path)
+def read_silver(spark: SparkSession, path: str, table: str | None) -> DataFrame:
+    return spark.read.table(table) if table else spark.read.format("delta").load(path)
 
 
-def write_gold(df: DataFrame, path: str) -> None:
-    df.write.format("delta").mode("overwrite").save(path)
+def write_gold(df: DataFrame, path: str, table: str | None) -> None:
+    if table:
+        df.write.format("delta").mode("overwrite").saveAsTable(table)
+    else:
+        df.write.format("delta").mode("overwrite").save(path)
 
 
 def main() -> None:
@@ -88,14 +93,14 @@ def main() -> None:
     spark = get_spark()
 
     try:
-        logger.info("Reading silver from %s", args.silver_path)
-        silver = read_silver(spark, args.silver_path)
+        logger.info("Reading silver")
+        silver = read_silver(spark, args.silver_path, args.silver_table)
 
         logger.info("Building gold features")
         features = build_features(silver)
 
-        logger.info("Writing gold to %s", args.gold_path)
-        write_gold(features, args.gold_path)
+        logger.info("Writing gold")
+        write_gold(features, args.gold_path, args.gold_table)
 
         logger.info("Gold features completed")
     except Exception:
