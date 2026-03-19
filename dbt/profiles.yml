@@ -1,0 +1,14 @@
+rm -f ~/.dbt/profiles.yml
+cat > ~/.dbt/profiles.yml << 'YML'
+nbp_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: databricks
+      host: dbc-2bf8872f-cc94.cloud.databricks.com
+      http_path: /sql/1.0/warehouses/291a3d1f2c5318a6
+      token: "{{ env_var('DATABRICKS_TOKEN') }}"
+      catalog: fx_lakehouse
+      schema: nbp
+      threads: 4
+YML

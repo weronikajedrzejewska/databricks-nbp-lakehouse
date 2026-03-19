@@ -1,0 +1,17 @@
+version: 2
+
+models:
+  - name: stg_silver_nbp_rates
+    description: Staging model for cleaned NBP silver exchange rates.
+    columns:
+      - name: rate_date
+        tests:
+          - not_null
+      - name: currency_code
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['AUD', 'BGN', 'BRL', 'CAD', 'CHF', 'CLP', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'HUF', 'IDR', 'ILS', 'INR', 'ISK', 'JPY', 'KRW', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP', 'RON', 'SEK', 'SGD', 'THB', 'TRY', 'UAH', 'USD', 'XDR', 'ZAR']
+      - name: mid_rate
+        tests:
+          - not_null

@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: mart_gold_fx_features
+    description: Gold feature table for FX analytics and downstream ML use cases.
+    columns:
+      - name: date
+        tests:
+          - not_null
+      - name: currency
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - date
+              - currency
