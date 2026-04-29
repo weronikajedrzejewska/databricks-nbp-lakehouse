@@ -3,7 +3,8 @@ import logging
 from typing import Set
 
 from delta import configure_spark_with_delta_pip
-from pyspark.sql import DataFrame, SparkSession, Window, functions as F
+from pyspark.sql import DataFrame, SparkSession, Window
+from pyspark.sql import functions as F
 
 SILVER_PATH_DEFAULT = "data/delta/silver/nbp_rates"
 GOLD_CORR_PATH_DEFAULT = "data/delta/gold/fx_correlation_30d"
@@ -18,7 +19,10 @@ def get_spark() -> SparkSession:
     builder = (
         SparkSession.builder.appName("build_gold_correlation")
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+        .config(
+            "spark.sql.catalog.spark_catalog",
+            "org.apache.spark.sql.delta.catalog.DeltaCatalog",
+        )
     )
     return configure_spark_with_delta_pip(builder).getOrCreate()
 
@@ -27,8 +31,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build 30-observation FX correlation snapshot.")
     parser.add_argument("--silver-path", default=SILVER_PATH_DEFAULT)
     parser.add_argument("--gold-path", default=GOLD_CORR_PATH_DEFAULT)
-    parser.add_argument("--silver-table", default=None, help="UC table, e.g. fx_lakehouse.nbp.silver_nbp_rates")
-    parser.add_argument("--gold-table", default=None, help="UC table, e.g. fx_lakehouse.nbp.gold_fx_correlation_30d")
+    parser.add_argument(
+        "--silver-table",
+        default=None,
+        help="UC table, e.g. fx_lakehouse.nbp.silver_nbp_rates",
+    )
+    parser.add_argument(
+        "--gold-table",
+        default=None,
+        help="UC table, e.g. fx_lakehouse.nbp.gold_fx_correlation_30d",
+    )
     return parser.parse_args()
 
 
@@ -72,7 +84,11 @@ def build_correlation_snapshot(df: DataFrame) -> DataFrame:
 
     # last 30 observations per currency
     w_desc = Window.partitionBy("currency_code").orderBy(F.col("rate_date").desc())
-    last30 = with_ret.withColumn("rn", F.row_number().over(w_desc)).filter(F.col("rn") <= 30).drop("rn")
+    last30 = (
+        with_ret.withColumn("rn", F.row_number().over(w_desc))
+        .filter(F.col("rn") <= 30)
+        .drop("rn")
+    )
 
     a = last30.alias("a")
     b = last30.alias("b")

@@ -1,5 +1,4 @@
 import argparse
-import json
 import logging
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -61,7 +60,12 @@ def create_session() -> requests.Session:
     return session
 
 
-def build_url(base_url: str, table: Literal["A", "B", "C"], start_date: date, end_date: date) -> str:
+def build_url(
+    base_url: str,
+    table: Literal["A", "B", "C"],
+    start_date: date,
+    end_date: date,
+) -> str:
     return (
         f"{base_url}/exchangerates/tables/{table}/"
         f"{start_date.isoformat()}/{end_date.isoformat()}/?format=json"
@@ -97,10 +101,28 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Ingest NBP exchange rate tables into bronze.")
     parser.add_argument("--base-url", default="https://api.nbp.pl/api", help="NBP API base URL")
     parser.add_argument("--table", default="A", choices=["A", "B", "C"], help="NBP table type")
-    parser.add_argument("--start-date", required=True, type=parse_iso_date, help="Start date YYYY-MM-DD")
-    parser.add_argument("--end-date", required=True, type=parse_iso_date, help="End date YYYY-MM-DD")
-    parser.add_argument("--output-jsonl", default="data/bronze/nbp_raw.jsonl", help="Local JSONL output path")
-    parser.add_argument("--output-table", default=None, help="Unity Catalog table, e.g. fx_lakehouse.nbp.bronze_nbp_raw")
+    parser.add_argument(
+        "--start-date",
+        required=True,
+        type=parse_iso_date,
+        help="Start date YYYY-MM-DD",
+    )
+    parser.add_argument(
+        "--end-date",
+        required=True,
+        type=parse_iso_date,
+        help="End date YYYY-MM-DD",
+    )
+    parser.add_argument(
+        "--output-jsonl",
+        default="data/bronze/nbp_raw.jsonl",
+        help="Local JSONL output path",
+    )
+    parser.add_argument(
+        "--output-table",
+        default=None,
+        help="Unity Catalog table, e.g. fx_lakehouse.nbp.bronze_nbp_raw",
+    )
     args = parser.parse_args()
 
     if args.start_date > args.end_date:

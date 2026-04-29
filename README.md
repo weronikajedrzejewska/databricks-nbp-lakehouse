@@ -24,6 +24,20 @@ Main feature table:
 
 `NBP API -> Bronze (raw payload) -> Silver (parsed, validated, deduplicated) -> Gold (features + correlation snapshot)`
 
+## Repository Structure
+
+```text
+src/ingestion/fetch_nbp_rates.py
+src/transform/bronze_to_silver_delta.py
+src/features/build_gold_features.py
+src/features/build_gold_correlation.py
+dbt/models/staging/stg_silver_nbp_rates.sql
+dbt/models/marts/mart_gold_fx_features.sql
+dbt/models/marts/mart_gold_fx_correlation.sql
+tests/
+.github/workflows/ci.yml
+```
+
 ## Implemented Layers
 
 ### Bronze
@@ -76,6 +90,8 @@ Two Gold outputs are implemented:
 - Delta tables managed in Unity Catalog
 - Orchestration with Databricks Workflows
 - dbt models and tests on Silver and Gold layers
+- Automated local quality checks with `ruff` and `pytest`
+- CI pipeline on GitHub Actions for linting and test execution
 
 ## dbt Coverage
 
@@ -125,6 +141,31 @@ Databricks Workflow runs the pipeline in sequence:
 
 The pipeline was validated on a 3-month historical backfill.
 
+## Local Quality Checks
+
+The repository includes a lightweight quality gate for portfolio and CI use:
+
+- `ruff` for Python linting
+- `pytest` for unit tests on ingestion and transformation logic
+- smoke test covering a local `Bronze -> Silver -> Gold` path without external services
+
+Run locally:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+make lint
+make test
+make smoke-test
+```
+
+What the smoke test proves:
+
+- Bronze payloads can be created from NBP-style input
+- Silver transformation parses, filters, and deduplicates rows correctly
+- Gold feature generation runs end-to-end on a local Spark session
+
 ## Known Trade-offs
 
 - `return_7d` is null for early observations when there is not enough history.
@@ -134,11 +175,75 @@ The pipeline was validated on a 3-month historical backfill.
 
 ## How To Run
 
-1. Generate raw NBP extract locally with `fetch_nbp_rates.py`.
-2. Upload `nbp_raw.jsonl` to Unity Catalog Volume.
-3. Run Bronze, Silver, Gold Features, and Gold Correlation notebooks in Databricks.
-4. Execute dbt models and tests locally against Databricks SQL Warehouse.
-5. Run the Databricks Workflow for orchestration.
+### 1. Install dependencies
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+### 2. Generate raw NBP extract locally
+
+```bash
+python src/ingestion/fetch_nbp_rates.py \
+  --start-date 2024-01-01 \
+  --end-date 2024-03-31 \
+  --output-jsonl data/bronze/nbp_raw.jsonl
+```
+
+### 3. Run the local Delta path
+
+```bash
+python src/transform/bronze_to_silver_delta.py \
+  --bronze-path data/bronze/nbp_raw.jsonl \
+  --silver-path data/delta/silver/nbp_rates
+
+python src/features/build_gold_features.py \
+  --silver-path data/delta/silver/nbp_rates \
+  --gold-path data/delta/gold/fx_features_ml
+
+python src/features/build_gold_correlation.py \
+  --silver-path data/delta/silver/nbp_rates \
+  --gold-path data/delta/gold/fx_correlation_30d
+```
+
+### 4. Configure dbt for Databricks SQL Warehouse
+
+Set the required environment variables:
+
+```bash
+export DATABRICKS_HOST=...
+export DATABRICKS_HTTP_PATH=...
+export DATABRICKS_TOKEN=...
+export DATABRICKS_CATALOG=fx_lakehouse
+export DATABRICKS_SCHEMA=nbp
+```
+
+Then copy the repo profile into your local dbt directory:
+
+```bash
+mkdir -p ~/.dbt
+cp dbt/profiles.yml ~/.dbt/profiles.yml
+```
+
+Install dbt packages and run tests:
+
+```bash
+cd dbt
+dbt deps
+dbt test
+```
+
+### 5. Run the Databricks workflow
+
+In the cloud variant, the pipeline sequence is:
+
+1. Bronze ingest
+2. Silver transform
+3. Gold features build
+4. Gold correlation build
+5. dbt tests on downstream models
 
 ## Current Status
 
@@ -149,6 +254,8 @@ Implemented:
 - Unity Catalog tables
 - dbt models and data quality tests
 - 3-month historical backfill
+- local unit tests and smoke test
+- CI workflow for linting and tests
 
 Planned next improvements:
 
@@ -156,3 +263,41 @@ Planned next improvements:
 - explicit schema drift checks
 - incremental Gold optimization
 - larger historical backfill
+
+## Suggested Screenshots For Portfolio
+
+To strengthen recruiter-facing proof, add screenshots of:
+
+- Databricks Workflow run graph with all tasks green
+- Unity Catalog tables in `fx_lakehouse.nbp`
+- sample rows from `silver_nbp_rates`
+- sample rows from `gold_fx_features`
+- dbt test results
+- one query or chart using Gold outputs
+
+Recommended location in the repo:
+
+```text
+docs/images/
+```
+
+Example file names:
+
+- `docs/images/databricks-workflow-run.png`
+- `docs/images/unity-catalog-tables.png`
+- `docs/images/silver-nbp-sample.png`
+- `docs/images/gold-fx-features-sample.png`
+- `docs/images/dbt-test-results.png`
+- `docs/images/gold-query-or-chart.png`
+
+Example Markdown snippet for `README.md`:
+
+```md
+## Screenshots
+
+### Databricks Workflow
+![Databricks Workflow run](docs/images/databricks-workflow-run.png)
+
+### Gold Features Sample
+![Gold features sample](docs/images/gold-fx-features-sample.png)
+```
