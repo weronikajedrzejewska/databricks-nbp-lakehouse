@@ -264,24 +264,15 @@ Planned next improvements:
 - incremental Gold optimization
 - larger historical backfill
 
-## Suggested Screenshots For Portfolio
+## Screenshots
 
-To strengthen recruiter-facing proof, add screenshots of:
-
-- Databricks Workflow run graph with all tasks green
-- Unity Catalog tables in `fx_lakehouse.nbp`
-- sample rows from `silver_nbp_rates`
-- sample rows from `gold_fx_features`
-- dbt test results
-- one query or chart using Gold outputs
-
-Recommended location in the repo:
+Add the screenshots below to strengthen recruiter-facing proof. Recommended location in the repo:
 
 ```text
 docs/images/
 ```
 
-Example file names:
+Suggested file names:
 
 - `docs/images/databricks-workflow-run.png`
 - `docs/images/unity-catalog-tables.png`
@@ -290,14 +281,38 @@ Example file names:
 - `docs/images/dbt-test-results.png`
 - `docs/images/gold-query-or-chart.png`
 
-Example Markdown snippet for `README.md`:
+### 1. Databricks Workflow Run
 
-```md
-## Screenshots
+Show the orchestration graph with all tasks green to prove the end-to-end pipeline ran successfully.
 
-### Databricks Workflow
 ![Databricks Workflow run](docs/images/databricks-workflow-run.png)
 
-### Gold Features Sample
+### 2. Unity Catalog Tables
+
+Show the registered Bronze, Silver, and Gold tables in `fx_lakehouse.nbp`.
+
+![Unity Catalog tables](docs/images/unity-catalog-tables.png)
+
+### 3. Silver Layer Sample
+
+Show a small sample from `silver_nbp_rates` to demonstrate cleaned, typed, deduplicated FX rows.
+
+![Silver NBP sample](docs/images/silver-nbp-sample.png)
+
+### 4. Gold Features Sample
+
+Show the output of `gold_fx_features`, especially `return_1d`, `return_7d`, `volatility_30d`, and `liquidity_proxy_7d`.
+
 ![Gold features sample](docs/images/gold-fx-features-sample.png)
-```
+
+### 5. dbt Test Results
+
+Show that dbt tests pass for Silver and Gold models.
+
+![dbt test results](docs/images/dbt-test-results.png)
+
+### 6. Downstream Query Or Chart
+
+Show one downstream SQL result or simple chart built on the Gold layer.
+
+![Gold query or chart](docs/images/gold-query-or-chart.png)
