@@ -266,7 +266,7 @@ Planned next improvements:
 
 ## Screenshots
 
-Add the screenshots below to strengthen recruiter-facing proof. Recommended location in the repo:
+The screenshots below document the actual Databricks workflow, catalog objects, sample outputs, and dbt validation results used in this project.
 
 ```text
 docs/images/
@@ -275,44 +275,51 @@ docs/images/
 Suggested file names:
 
 - `docs/images/databricks-workflow-run.png`
+- `docs/images/databricks-workflow-scheduled.png`
 - `docs/images/unity-catalog-tables.png`
 - `docs/images/silver-nbp-sample.png`
 - `docs/images/gold-fx-features-sample.png`
+- `docs/images/gold_fx_correlation_30d.png`
 - `docs/images/dbt-test-results.png`
-- `docs/images/gold-query-or-chart.png`
 
 ### 1. Databricks Workflow Run
 
-Show the orchestration graph with all tasks green to prove the end-to-end pipeline ran successfully.
+Workflow graph for a successful scheduled run showing the Bronze, Silver, and Gold steps executed end-to-end.
 
 ![Databricks Workflow run](docs/images/databricks-workflow-run.png)
 
-### 2. Unity Catalog Tables
+### 2. Databricks Workflow Schedule
+
+Daily workflow schedule and successful historical runs triggered by the Databricks scheduler.
+
+![Databricks workflow schedule](docs/images/databricks-workflow-scheduled.png)
+
+### 3. Unity Catalog Tables
 
 Show the registered Bronze, Silver, and Gold tables in `fx_lakehouse.nbp`.
 
 ![Unity Catalog tables](docs/images/unity-catalog-tables.png)
 
-### 3. Silver Layer Sample
+### 4. Silver Layer Sample
 
-Show a small sample from `silver_nbp_rates` to demonstrate cleaned, typed, deduplicated FX rows.
+Sample rows from `silver_nbp_rates`, showing cleaned, typed, and deduplicated FX records.
 
 ![Silver NBP sample](docs/images/silver-nbp-sample.png)
 
-### 4. Gold Features Sample
+### 5. Gold Features Sample
 
-Show the output of `gold_fx_features`, especially `return_1d`, `return_7d`, `volatility_30d`, and `liquidity_proxy_7d`.
+Presentation query and sample output from `gold_fx_features`, with rounded metrics for readability.
 
 ![Gold features sample](docs/images/gold-fx-features-sample.png)
 
-### 5. dbt Test Results
+### 6. Gold Correlation Sample
 
-Show that dbt tests pass for Silver and Gold models.
+Sample output from `gold_fx_correlation_30d`, showing pairwise 30-observation correlation results.
+
+![Gold correlation sample](docs/images/gold_fx_correlation_30d.png)
+
+### 7. dbt Test Results
+
+`dbt test` results confirming successful validation checks on Silver and Gold models.
 
 ![dbt test results](docs/images/dbt-test-results.png)
-
-### 6. Downstream Query Or Chart
-
-Show one downstream SQL result or simple chart built on the Gold layer.
-
-![Gold query or chart](docs/images/gold-query-or-chart.png)
