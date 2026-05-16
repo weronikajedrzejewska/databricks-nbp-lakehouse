@@ -3,6 +3,11 @@ version: 2
 models:
   - name: stg_silver_nbp_rates
     description: Staging model for cleaned NBP silver exchange rates.
+    config:
+      freshness:
+        warn_after: {count: 1, period: day}
+        error_after: {count: 3, period: day}
+      loaded_at_field: ingestion_ts
     columns:
       - name: rate_date
         tests:
@@ -15,3 +20,11 @@ models:
       - name: mid_rate
         tests:
           - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: false
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1000
+              config:
+                severity: warn

@@ -10,6 +10,23 @@ models:
       - name: currency
         tests:
           - not_null
+      - name: return_1d
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -1
+              max_value: 10
+              config:
+                severity: warn
+      - name: return_7d
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -1
+              max_value: 10
+              config:
+                severity: warn
+      - name: volatility_reliable
+        tests:
+          - not_null
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:

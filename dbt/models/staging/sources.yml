@@ -1,0 +1,23 @@
+version: 2
+
+sources:
+  - name: nbp
+    database: fx_lakehouse
+    schema: nbp
+    tables:
+      - name: silver_nbp_rates
+        description: Cleaned and deduplicated NBP FX rates from the Silver layer.
+        loaded_at_field: ingestion_ts
+        freshness:
+          warn_after: {count: 1, period: day}
+          error_after: {count: 3, period: day}
+        columns:
+          - name: rate_date
+            tests:
+              - not_null
+          - name: currency_code
+            tests:
+              - not_null
+          - name: mid_rate
+            tests:
+              - not_null

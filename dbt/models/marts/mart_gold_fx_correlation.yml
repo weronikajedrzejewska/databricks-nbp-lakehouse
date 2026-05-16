@@ -16,6 +16,18 @@ models:
       - name: obs_cnt
         tests:
           - not_null
+          - dbt_utils.accepted_range:
+              min_value: 1
+      - name: corr_30d
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -1
+              max_value: 1
+              config:
+                severity: warn
+      - name: is_statistically_reliable
+        tests:
+          - not_null
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
