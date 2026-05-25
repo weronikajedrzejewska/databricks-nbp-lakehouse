@@ -30,9 +30,13 @@ flowchart LR
 
 ## Pipeline Evidence
 
-| Databricks Workflow | Gold FX Features |
-|---|---|
-| <img src="docs/images/databricks-workflow-run.png" alt="Databricks Workflow run" width="460"> | <img src="docs/images/gold-fx-features-sample.png" alt="Gold FX features sample" width="460"> |
+### Databricks Workflow
+
+![Databricks Workflow run](docs/images/databricks-workflow-run.png)
+
+### Gold Features Output
+
+![Gold features sample](docs/images/gold-fx-features-sample.png)
 
 <details>
 <summary><strong>More Databricks and table evidence</strong></summary>
