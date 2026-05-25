@@ -13,10 +13,6 @@ End-to-end data engineering pipeline built on Databricks, ingesting daily FX rat
 
 ![Databricks Workflow run](docs/images/databricks-workflow-run.png)
 
-### Gold Features Output
-
-![Gold features sample](docs/images/gold-fx-features-sample.png)
-
 ### Workflow Schedule & Run History
 
 ![Databricks workflow schedule](docs/images/databricks-workflow-scheduled.png)
@@ -28,6 +24,10 @@ End-to-end data engineering pipeline built on Databricks, ingesting daily FX rat
 ### Silver Layer Sample
 
 ![Silver NBP sample](docs/images/silver-nbp-sample.png)
+
+### Gold Features Output
+
+![Gold features sample](docs/images/gold-fx-features-sample.png)
 
 ### Gold Correlation Sample
 
