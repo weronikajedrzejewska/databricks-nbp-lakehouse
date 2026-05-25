@@ -1,17 +1,41 @@
 # NBP Exchange Rates Lakehouse (Databricks)
 
-![CI](https://github.com/weronikajedrzejewska/databricks-nbp-lakehouse/actions/workflows/ci.yml/badge.svg)
-![Python](https://img.shields.io/badge/python-3.11-blue)
-![Databricks](https://img.shields.io/badge/Databricks-Unity%20Catalog-red)
-![dbt](https://img.shields.io/badge/dbt-tested-orange)
+![CI](https://img.shields.io/badge/CI-pytest%20%2B%20ruff-2ea44f) ![Python](https://img.shields.io/badge/python-3.11-blue) ![Databricks](https://img.shields.io/badge/Databricks-Unity%20Catalog-red) ![dbt](https://img.shields.io/badge/dbt-models%20%2B%20tests-orange)
 
-End-to-end data engineering pipeline built on Databricks, ingesting daily FX rates from the [NBP (National Bank of Poland) public REST API](https://api.nbp.pl/). Follows Medallion architecture (Bronze → Silver → Gold), stores data in Delta tables under Unity Catalog, orchestrated with Databricks Workflows, and validated with dbt tests and a local CI pipeline.
+End-to-end data engineering pipeline built on Databricks, ingesting daily FX rates from the [NBP (National Bank of Poland) public REST API](https://api.nbp.pl/). Follows Medallion architecture (Bronze → Silver → Gold), stores data in Delta tables under Unity Catalog, orchestrated with Databricks Workflows, and validated with dbt tests plus local CI checks.
 
-## Pipeline in Action
+The project turns raw public exchange-rate data into analytics-ready Delta tables that can support BI reporting, currency monitoring, and ML-style feature engineering. Its main Gold output provides one row per currency per day with returns, rolling volatility, liquidity proxy, and reliability flags so downstream consumers can filter incomplete statistical windows explicitly.
 
-### Databricks Workflow
+## Key Highlights
 
-![Databricks Workflow run](docs/images/databricks-workflow-run.png)
+- Databricks Lakehouse implementation using Delta Lake and Unity Catalog
+- Medallion pipeline from raw API payloads to curated Silver and analytical Gold tables
+- Incremental dbt marts for FX features and 30-day pairwise correlation snapshots
+- Idempotent Silver merge logic with deterministic business keys
+- Data quality controls for malformed payloads, invalid rates, missing dates, and duplicate rows
+- Cross-layer reconciliation, idempotency, smoke, and edge-case tests in `pytest`
+- Databricks Workflow orchestration with daily scheduling and dbt validation
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A["NBP REST API"] --> B["Bronze: raw payload"]
+    B --> C["Silver: parsed, validated, deduplicated"]
+    C --> D["Gold: FX features"]
+    C --> E["Gold: 30d correlation"]
+    D --> F["dbt tests"]
+    E --> F
+```
+
+## Pipeline Evidence
+
+| Databricks Workflow | Gold FX Features |
+|---|---|
+| <img src="docs/images/databricks-workflow-run.png" alt="Databricks Workflow run" width="460"> | <img src="docs/images/gold-fx-features-sample.png" alt="Gold FX features sample" width="460"> |
+
+<details>
+<summary><strong>More Databricks and table evidence</strong></summary>
 
 ### Workflow Schedule & Run History
 
@@ -25,40 +49,15 @@ End-to-end data engineering pipeline built on Databricks, ingesting daily FX rat
 
 ![Silver NBP sample](docs/images/silver-nbp-sample.png)
 
-### Gold Features Output
-
-![Gold features sample](docs/images/gold-fx-features-sample.png)
-
 ### Gold Correlation Sample
 
 ![Gold correlation sample](docs/images/gold_fx_correlation_30d.png)
 
-### dbt Test Results
+</details>
 
-![dbt test results](docs/images/dbt-test-results.png)
+## Output
 
-## Architecture
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#cd7f32', 'primaryTextColor': '#fff', 'primaryBorderColor': '#a0522d', 'lineColor': '#888', 'secondaryColor': '#c0c0c0', 'tertiaryColor': '#ffd700'}}}%%
-flowchart LR
-    A([NBP REST API]):::source --> B[Bronze\nraw payload]:::bronze
-    B --> C[Silver\nparsed · validated · deduped]:::silver
-    C --> D[Gold: FX Features\nreturns · volatility · liquidity]:::gold
-    C --> E[Gold: Correlation\n30d pairwise snapshot]:::gold
-    D --> F[dbt tests]:::dbt
-    E --> F
-
-    classDef source fill:#4a4a4a,color:#fff,stroke:#666
-    classDef bronze fill:#cd7f32,color:#fff,stroke:#a0522d
-    classDef silver fill:#8a9ba8,color:#fff,stroke:#6c7d8a
-    classDef gold fill:#c9a800,color:#fff,stroke:#a08800
-    classDef dbt fill:#ff6b35,color:#fff,stroke:#cc4a1a
-```
-
-## What It Delivers
-
-Production-style FX analytics pipeline with reliable datasets for BI and ML-style feature engineering. Main output: one row per currency per day with computed returns, volatility, and reliability flags.
+FX analytics pipeline with reliable datasets for BI and ML-style feature engineering. The main output is one row per currency per day with computed returns, volatility, and reliability flags.
 
 `date | currency | return_1d | return_7d | volatility_30d | volatility_reliable | liquidity_proxy_7d`
 
@@ -79,15 +78,26 @@ Production-style FX analytics pipeline with reliable datasets for BI and ML-styl
 |---|---|
 | Catalog | `fx_lakehouse` |
 | Schema | `nbp` |
+| Volume | `fx_lakehouse.nbp.landing` |
 | Bronze table | `fx_lakehouse.nbp.bronze_nbp_raw` |
 | Silver table | `fx_lakehouse.nbp.silver_nbp_rates` |
 | Gold table | `fx_lakehouse.nbp.gold_fx_features` |
 | Gold table | `fx_lakehouse.nbp.gold_fx_correlation_30d` |
-| Volume | `fx_lakehouse.nbp.landing` |
 
-Pipeline runs in sequence: **Bronze ingest → Silver transform → Gold features → Gold correlation → dbt tests**
+Workflow order: **Bronze ingest → Silver transform → Gold features → Gold correlation → dbt tests**
 
-## What Makes It Production-Style
+## Databricks Deployment
+
+The Databricks version is configured around Unity Catalog objects and a scheduled Workflow run:
+
+- `fx_lakehouse.nbp.landing` stores raw JSONL extracts in a managed Volume
+- Bronze ingestion loads the raw NBP payload into `bronze_nbp_raw` with source metadata
+- Silver transformation parses, validates, deduplicates, and merges rates into `silver_nbp_rates`
+- Gold tasks build `gold_fx_features` and `gold_fx_correlation_30d` for analytics use cases
+- dbt runs against Databricks SQL Warehouse using `DATABRICKS_*` environment variables
+- The Workflow is scheduled daily and executes the pipeline in dependency order
+
+## Engineering Overview
 
 - Idempotent Silver processing via deterministic merge keys
 - Raw payload preservation in Bronze with full source traceability
@@ -123,6 +133,33 @@ Tests:
 - `dbt_utils.accepted_range` on `obs_cnt` (must be >= 1)
 - unique combination tests on business keys
 - freshness check on Silver (warn after 1 business day, error after 3)
+
+dbt test summary from the recorded Databricks run:
+
+| Metric | Result |
+|---|---|
+| Tests executed | 23 |
+| Passed | 23 |
+| Failed | 0 |
+| dbt version | 1.11.8 |
+| Validation scope | staging, Gold features, Gold correlation |
+
+<details>
+<summary><strong>dbt test run evidence</strong></summary>
+
+<img src="docs/images/dbt-test-results.png" alt="dbt test results" width="900">
+
+</details>
+
+## Testing Strategy
+
+| Test layer | Purpose |
+|---|---|
+| `pytest` smoke test | Runs the local Bronze → Silver → Gold path without external services |
+| Silver idempotency tests | Verifies reruns do not create duplicate business keys |
+| Cross-layer reconciliation | Ties Bronze exploded rows, Silver accepted rows, rejections, and Gold outputs |
+| Edge-case tests | Covers malformed payloads, SLA breaches, empty input, and invalid records |
+| dbt tests | Validates Databricks tables with range, freshness, uniqueness, and accepted-value checks |
 
 ## Repository Structure
 
