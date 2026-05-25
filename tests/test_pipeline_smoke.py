@@ -33,9 +33,10 @@ def test_local_pipeline_smoke(spark):
     bronze_records = [record.model_dump() for record in to_bronze_records(tables, "https://api.nbp.pl/api")]
     bronze_df = spark.createDataFrame(bronze_records)
 
-    silver_df = transform_bronze_to_silver_df(bronze_df)
+    silver_df, metrics = transform_bronze_to_silver_df(bronze_df)
     gold_df = build_features(silver_df)
 
+    assert metrics.total_rejected == 0
     assert silver_df.count() == 4
     assert gold_df.count() == 4
     assert set(gold_df.columns) == {
@@ -44,5 +45,6 @@ def test_local_pipeline_smoke(spark):
         "return_1d",
         "return_7d",
         "volatility_30d",
+        "volatility_reliable",
         "liquidity_proxy_7d",
     }

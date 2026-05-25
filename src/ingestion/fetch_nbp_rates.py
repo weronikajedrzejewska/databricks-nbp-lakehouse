@@ -1,6 +1,6 @@
 import argparse
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -8,6 +8,8 @@ import requests
 from pydantic import BaseModel, ValidationError
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+JSONL_DATE_FORMAT = "%Y-%m-%d"
 
 
 class NbpRate(BaseModel):
@@ -97,6 +99,93 @@ def to_bronze_records(tables: list[NbpTable], source_url: str) -> list[BronzeRec
     ]
 
 
+def expected_business_days(start: date, end: date) -> set[date]:
+    """Return the set of Mon–Fri dates in [start, end]."""
+    days: set[date] = set()
+    current = start
+    while current <= end:
+        if current.weekday() < 5:
+            days.add(current)
+        current += timedelta(days=1)
+    return days
+
+
+MAX_MISSING_BUSINESS_DAYS = 1
+
+
+def reconcile_date_coverage(
+    records: list[BronzeRecord],
+    start: date,
+    end: date,
+    logger: logging.Logger,
+) -> None:
+    received = {r.effective_date for r in records}
+    expected = expected_business_days(start, end)
+    missing = expected - received
+    unexpected = received - expected  # dates outside the requested range
+
+    logger.info(
+        "Date coverage: requested=%s–%s expected_business_days=%d received=%d missing=%d",
+        start.isoformat(),
+        end.isoformat(),
+        len(expected),
+        len(received),
+        len(missing),
+    )
+    if missing:
+        missing_list = sorted(missing)
+        logger.warning(
+            "Missing %d business day(s) from API response: %s%s",
+            len(missing_list),
+            ", ".join(d.isoformat() for d in missing_list[:10]),
+            " ..." if len(missing_list) > 10 else "",
+        )
+        if len(missing_list) > MAX_MISSING_BUSINESS_DAYS:
+            raise ValueError(
+                f"SLA breach: {len(missing_list)} business day(s) missing from API response "
+                f"(threshold={MAX_MISSING_BUSINESS_DAYS}). Missing: "
+                + ", ".join(d.isoformat() for d in missing_list[:10])
+                + (" ..." if len(missing_list) > 10 else "")
+            )
+    if unexpected:
+        logger.warning(
+            "API returned %d date(s) outside requested range: %s",
+            len(unexpected),
+            ", ".join(d.isoformat() for d in sorted(unexpected)),
+        )
+
+
+def filter_already_ingested_jsonl(
+    records: list[BronzeRecord],
+    output_path: Path,
+    logger: logging.Logger,
+) -> list[BronzeRecord]:
+    """Drop records whose (table_type, effective_date) already exist in the JSONL file."""
+    if not output_path.exists():
+        return records
+
+    existing: set[tuple[str, str]] = set()
+    with output_path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = BronzeRecord.model_validate_json(line)
+                existing.add((row.table_type, row.effective_date.strftime(JSONL_DATE_FORMAT)))
+            except Exception:
+                logger.warning("Skipping malformed JSONL line (parse error): %.120s", line)
+
+    new_records = [
+        r for r in records
+        if (r.table_type, r.effective_date.strftime(JSONL_DATE_FORMAT)) not in existing
+    ]
+    skipped = len(records) - len(new_records)
+    if skipped:
+        logger.info("Idempotency check: skipped=%d already-ingested records", skipped)
+    return new_records
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ingest NBP exchange rate tables into bronze.")
     parser.add_argument("--base-url", default="https://api.nbp.pl/api", help="NBP API base URL")
@@ -136,21 +225,51 @@ def main() -> None:
         logger.info("Fetching NBP data from %s", url)
         tables = fetch_rates(url, session)
         records = to_bronze_records(tables, url)
+        reconcile_date_coverage(records, args.start_date, args.end_date, logger)
 
         if args.output_table:
             from pyspark.sql import SparkSession
 
             spark = SparkSession.builder.getOrCreate()
-            df = spark.createDataFrame([r.model_dump() for r in records])
-            df.write.format("delta").mode("append").saveAsTable(args.output_table)
-            logger.info("Ingestion completed. rows=%s table=%s", len(records), args.output_table)
+            all_df = spark.createDataFrame([r.model_dump() for r in records])
+
+            if spark.catalog.tableExists(args.output_table):
+                existing_keys = spark.read.table(args.output_table).select(
+                    "table_type", "effective_date"
+                ).distinct()
+                new_df = all_df.join(
+                    existing_keys,
+                    on=["table_type", "effective_date"],
+                    how="left_anti",
+                )
+                skipped = all_df.count() - new_df.count()
+                if skipped:
+                    logger.info("Idempotency check: skipped=%d already-ingested records", skipped)
+            else:
+                new_df = all_df
+
+            row_count = new_df.count()
+            if row_count:
+                new_df.write.format("delta").mode("append").saveAsTable(args.output_table)
+            logger.info(
+                "Ingestion completed. written=%d skipped=%d table=%s",
+                row_count,
+                len(records) - row_count,
+                args.output_table,
+            )
         else:
             output_path = Path(args.output_jsonl)
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            with output_path.open("w", encoding="utf-8") as f:
-                for row in records:
+            new_records = filter_already_ingested_jsonl(records, output_path, logger)
+            with output_path.open("a", encoding="utf-8") as f:
+                for row in new_records:
                     f.write(row.model_dump_json() + "\n")
-            logger.info("Ingestion completed. rows=%s output=%s", len(records), output_path)
+            logger.info(
+                "Ingestion completed. written=%d skipped=%d output=%s",
+                len(new_records),
+                len(records) - len(new_records),
+                output_path,
+            )
 
     except (requests.RequestException, ValidationError, ValueError, OSError):
         logger.exception("Ingestion failed for url=%s", url)

@@ -61,7 +61,10 @@ def write_gold(df: DataFrame, path: str, table: str | None) -> None:
         df.write.format("delta").mode("overwrite").partitionBy("as_of_date").save(path)
 
 
-def build_correlation_snapshot(df: DataFrame) -> DataFrame:
+MIN_OBS_FOR_CORR = 10
+
+
+def build_correlation_snapshot(df: DataFrame, logger: logging.Logger | None = None) -> DataFrame:
     """
     Build correlation snapshot for all FX pairs using last 30 observations per currency.
 
@@ -110,8 +113,21 @@ def build_correlation_snapshot(df: DataFrame) -> DataFrame:
             F.count("*").alias("obs_cnt"),
         )
         .crossJoin(as_of_date_df)
-        .select("as_of_date", "currency_a", "currency_b", "corr_30d", "obs_cnt")
+        .withColumn("is_statistically_reliable", F.col("obs_cnt") >= MIN_OBS_FOR_CORR)
+        .select(
+            "as_of_date", "currency_a", "currency_b",
+            "corr_30d", "obs_cnt", "is_statistically_reliable",
+        )
     )
+
+    if logger:
+        low_obs = corr.filter(~F.col("is_statistically_reliable")).count()
+        if low_obs > 0:
+            logger.warning(
+                "%d correlation pair(s) have obs_cnt < %d — statistically unreliable",
+                low_obs,
+                MIN_OBS_FOR_CORR,
+            )
 
     return corr
 
@@ -126,7 +142,7 @@ def main() -> None:
         silver = read_silver(spark, args.silver_path, args.silver_table)
 
         logger.info("Building correlation snapshot")
-        corr = build_correlation_snapshot(silver)
+        corr = build_correlation_snapshot(silver, logger)
 
         logger.info("Writing gold correlation")
         write_gold(corr, args.gold_path, args.gold_table)

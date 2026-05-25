@@ -1,6 +1,6 @@
 import argparse
 import logging
-from typing import Tuple
+from typing import Set, Tuple
 
 from delta import configure_spark_with_delta_pip
 from pyspark.sql import DataFrame, SparkSession, Window
@@ -50,6 +50,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def validate_input(df: DataFrame, required: Set[str]) -> None:
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {sorted(missing)}")
+
+
 def build_windows() -> Tuple[Window, Window, Window]:
     w_order = Window.partitionBy("currency_code").orderBy("rate_date")
     w_30d = w_order.rowsBetween(-(VOLATILITY_WINDOW - 1), 0)
@@ -58,6 +64,7 @@ def build_windows() -> Tuple[Window, Window, Window]:
 
 
 def build_features(df: DataFrame) -> DataFrame:
+    validate_input(df, {"rate_date", "currency_code", "mid_rate"})
     w_order, w_30d, w_7d = build_windows()
 
     lag_1 = F.lag("mid_rate", RETURN_1D_LAG).over(w_order)
@@ -77,12 +84,14 @@ def build_features(df: DataFrame) -> DataFrame:
             "volatility_30d",
             F.when(F.col("obs_cnt_30d") >= MIN_OBS_FOR_VOL, F.col("volatility_30d_raw")),
         )
+        .withColumn("volatility_reliable", F.col("obs_cnt_30d") >= MIN_OBS_FOR_VOL)
         .select(
             F.col("rate_date").alias("date"),
             F.col("currency_code").alias("currency"),
             "return_1d",
             "return_7d",
             "volatility_30d",
+            "volatility_reliable",
             "liquidity_proxy_7d",
         )
     )

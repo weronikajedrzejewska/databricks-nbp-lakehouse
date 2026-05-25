@@ -3,7 +3,13 @@ import pytest
 pytest.importorskip("pyspark")
 pytest.importorskip("delta")
 
-from src.features.build_gold_features import build_features
+from src.features.build_gold_features import build_features, validate_input
+
+
+def test_validate_input_raises_for_missing_columns(spark):
+    df = spark.createDataFrame([{"rate_date": "2024-01-01"}])
+    with pytest.raises(ValueError, match="Missing required columns"):
+        validate_input(df, {"rate_date", "currency_code", "mid_rate"})
 
 
 def test_build_features_returns_expected_columns(spark):
@@ -30,6 +36,7 @@ def test_build_features_returns_expected_columns(spark):
         "return_1d",
         "return_7d",
         "volatility_30d",
+        "volatility_reliable",
         "liquidity_proxy_7d",
     ]
     assert features_df.count() == 6

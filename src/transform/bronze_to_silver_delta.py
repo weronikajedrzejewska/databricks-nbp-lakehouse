@@ -1,5 +1,6 @@
 import argparse
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from delta import configure_spark_with_delta_pip
@@ -71,35 +72,104 @@ PAYLOAD_SCHEMA = StructType(
 )
 
 
-def transform_bronze_to_silver_df(bronze_df):
+@dataclass
+class TransformMetrics:
+    input_rows: int = 0
+    rejected_null_date: int = 0
+    rejected_invalid_code: int = 0
+    rejected_null_mid: int = 0
+    rejected_zero_mid: int = 0
+    deduplicated: int = 0
+    output_rows: int = 0
+
+    @property
+    def total_rejected(self) -> int:
+        return (
+            self.rejected_null_date
+            + self.rejected_invalid_code
+            + self.rejected_null_mid
+            + self.rejected_zero_mid
+        )
+
+    def log(self, logger: logging.Logger) -> None:
+        logger.info(
+            "Transform metrics: input=%d rejected=%d"
+            " (null_date=%d invalid_code=%d null_mid=%d zero_mid=%d)"
+            " deduplicated=%d output=%d",
+            self.input_rows,
+            self.total_rejected,
+            self.rejected_null_date,
+            self.rejected_invalid_code,
+            self.rejected_null_mid,
+            self.rejected_zero_mid,
+            self.deduplicated,
+            self.output_rows,
+        )
+        if self.total_rejected > 0:
+            reject_pct = self.total_rejected / self.input_rows * 100 if self.input_rows else 0
+            logger.warning(
+                "Rejected %.1f%% of exploded rows — review source data quality", reject_pct
+            )
+
+
+def transform_bronze_to_silver_df(bronze_df) -> tuple:
+    """Returns (silver_df, TransformMetrics)."""
     parsed = (
         bronze_df.withColumn("payload", F.from_json(F.col("raw_payload"), PAYLOAD_SCHEMA))
         .withColumn("ingestion_ts", F.to_timestamp("ingestion_ts"))
         .select("table_type", "effective_date", "ingestion_ts", "payload")
     )
 
-    exploded = (
-        parsed.withColumn("rate", F.explode(F.col("payload.rates")))
-        .select(
-            F.col("table_type"),
-            F.to_date(
-                F.coalesce(F.col("effective_date"), F.col("payload.effectiveDate"))
-            ).alias("rate_date"),
-            F.col("rate.code").alias("currency_code"),
-            F.col("rate.currency").alias("currency_name"),
-            F.col("rate.mid").alias("mid_rate"),
-            F.col("ingestion_ts"),
+    null_payload_count = parsed.filter(
+        F.col("payload").isNull() | F.col("payload.rates").isNull()
+    ).count()
+    if null_payload_count > 0:
+        raise ValueError(
+            f"JSON parse failure: {null_payload_count} bronze row(s) produced a null payload. "
+            "Check raw_payload for malformed JSON."
         )
-        .filter(F.col("rate_date").isNotNull())
-        .filter(F.length(F.col("currency_code")) == 3)
-        .filter(F.col("mid_rate").isNotNull())
-        .filter(F.col("mid_rate") > 0)
+
+    exploded = parsed.withColumn("rate", F.explode(F.col("payload.rates"))).select(
+        F.col("table_type"),
+        F.to_date(
+            F.coalesce(F.col("effective_date"), F.col("payload.effectiveDate"))
+        ).alias("rate_date"),
+        F.col("rate.code").alias("currency_code"),
+        F.col("rate.currency").alias("currency_name"),
+        F.col("rate.mid").alias("mid_rate"),
+        F.col("ingestion_ts"),
     )
+
+    input_rows = exploded.count()
+
+    null_date = exploded.filter(F.col("rate_date").isNull())
+    after_date = exploded.filter(F.col("rate_date").isNotNull())
+
+    invalid_code = after_date.filter(F.length(F.col("currency_code")) != 3)
+    after_code = after_date.filter(F.length(F.col("currency_code")) == 3)
+
+    null_mid = after_code.filter(F.col("mid_rate").isNull())
+    after_null_mid = after_code.filter(F.col("mid_rate").isNotNull())
+
+    zero_mid = after_null_mid.filter(F.col("mid_rate") <= 0)
+    valid = after_null_mid.filter(F.col("mid_rate") > 0)
 
     w = Window.partitionBy("table_type", "rate_date", "currency_code").orderBy(
         F.col("ingestion_ts").desc()
     )
-    return exploded.withColumn("rn", F.row_number().over(w)).filter(F.col("rn") == 1).drop("rn")
+    deduped = valid.withColumn("rn", F.row_number().over(w)).filter(F.col("rn") == 1).drop("rn")
+
+    metrics = TransformMetrics(
+        input_rows=input_rows,
+        rejected_null_date=null_date.count(),
+        rejected_invalid_code=invalid_code.count(),
+        rejected_null_mid=null_mid.count(),
+        rejected_zero_mid=zero_mid.count(),
+        deduplicated=valid.count() - deduped.count(),
+        output_rows=deduped.count(),
+    )
+
+    return deduped, metrics
 
 
 def main() -> None:
@@ -116,7 +186,8 @@ def main() -> None:
             logger.info("Reading bronze path %s", args.bronze_path)
             bronze = spark.read.schema(BRONZE_SCHEMA).json(args.bronze_path)
 
-        silver_batch = transform_bronze_to_silver_df(bronze)
+        silver_batch, metrics = transform_bronze_to_silver_df(bronze)
+        metrics.log(logger)
 
         if args.silver_table:
             if not spark.catalog.tableExists(args.silver_table):
