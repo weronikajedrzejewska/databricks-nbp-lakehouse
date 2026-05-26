@@ -1,4 +1,4 @@
-# NBP Exchange Rates Lakehouse (Databricks)
+# NBP Exchange Rates Lakehouse
 
 ![CI](https://img.shields.io/badge/CI-pytest%20%2B%20ruff-2ea44f) ![Python](https://img.shields.io/badge/python-3.11-blue) ![Databricks](https://img.shields.io/badge/Databricks-Unity%20Catalog-red) ![dbt](https://img.shields.io/badge/dbt-models%20%2B%20tests-orange)
 
